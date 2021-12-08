@@ -9,6 +9,7 @@ import {
   Put,
   Req,
   Res,
+  UnauthorizedException,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -27,8 +28,8 @@ export class AuthController {
     private jwtService: JwtService,
   ) {}
 
-  @Post('admin/register')
-  async register(@Body() body: RegisterDto) {
+  @Post(['admin/register', 'ambassador/register'])
+  async register(@Body() body: RegisterDto, @Req() request: Request) {
     const { password_confirm, ...data } = body;
     if (body.password !== password_confirm) {
       throw new BadRequestException('Passwords do not match!');
@@ -39,15 +40,16 @@ export class AuthController {
     return this.userService.save({
       ...data,
       password: hashed,
-      is_ambassador: false,
+      is_ambassador: request.path === '/api/ambassador/register',
     });
   }
 
-  @Post('admin/login')
+  @Post(['admin/login', 'ambassador/login'])
   async login(
     @Body('email') email: string,
     @Body('password') password: string,
     @Res({ passthrough: true }) response: Response,
+    @Req() request: Request,
   ) {
     const user = await this.userService.findOne({ email });
 
@@ -55,12 +57,19 @@ export class AuthController {
       throw new NotFoundException('User not found');
     }
 
-    if (await bcrypt.compare(password, user.password)) {
+    if (!(await bcrypt.compare(password, user.password))) {
       throw new BadRequestException('Invalid credentials');
+    }
+
+    const adminLogin = request.path === '/api/admin/login';
+
+    if (user.is_ambassador && adminLogin) {
+      throw new UnauthorizedException();
     }
 
     const jwt = await this.jwtService.signAsync({
       id: user.id,
+      scope: adminLogin ? 'admin' : 'ambassador',
     });
 
     response.cookie('jwt', jwt, { httpOnly: true });
@@ -71,7 +80,7 @@ export class AuthController {
   }
 
   @UseGuards(AuthGuard)
-  @Get('admin/user')
+  @Get(['admin/user', 'ambassador/user'])
   async user(@Req() request: Request) {
     const cookie = request.cookies['jwt'];
 
@@ -82,7 +91,7 @@ export class AuthController {
   }
 
   @UseGuards(AuthGuard)
-  @Post('admin/logout')
+  @Post(['admin/logout', 'ambassador/logout'])
   async logout(@Res({ passthrough: true }) response: Response) {
     response.clearCookie('jwt');
 
@@ -92,7 +101,7 @@ export class AuthController {
   }
 
   @UseGuards(AuthGuard)
-  @Put('admin/users/info')
+  @Put(['admin/users/info', 'ambassador/users/info'])
   async updateInfo(
     @Req() request: Request,
     @Body('first_name') first_name: string,
@@ -113,7 +122,7 @@ export class AuthController {
   }
 
   @UseGuards(AuthGuard)
-  @Put('admin/users/password')
+  @Put(['admin/users/password', 'ambassador/users/password'])
   async updatePassword(
     @Req() request: Request,
     @Body('password') password: string,

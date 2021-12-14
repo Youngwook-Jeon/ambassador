@@ -4,7 +4,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Controller, Get } from '@nestjs/common';
-import { AuthGuard } from 'src/auth/auth.guard';
+import { AuthGuard } from '../auth/auth.guard';
 import { OrderService } from './order.service';
 
 @Controller()

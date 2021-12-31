@@ -17,6 +17,7 @@ import { ProductService } from '../product/product.service';
 import { OrderItem } from './order-item';
 import { Product } from '../product/product';
 import { OrderItemService } from './order-item.service';
+import { Connection } from 'typeorm';
 
 @Controller()
 export class OrderController {
@@ -25,6 +26,7 @@ export class OrderController {
     private linkService: LinkService,
     private productService: ProductService,
     private orderItemService: OrderItemService,
+    private connection: Connection,
   ) {}
 
   @UseGuards(AuthGuard)
@@ -47,36 +49,50 @@ export class OrderController {
       throw new BadRequestException('Invalid link!');
     }
 
-    const o = new Order();
-    o.user_id = link.user.id;
-    o.ambassador_email = link.user.email;
-    o.first_name = body.first_name;
-    o.last_name = body.last_name;
-    o.email = body.email;
-    o.address = body.address;
-    o.country = body.country;
-    o.city = body.city;
-    o.zip = body.zip;
-    o.code = body.code;
+    const queryRunner = this.connection.createQueryRunner();
 
-    const order = await this.orderService.save(o);
+    try {
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
 
-    for (const p of body.products) {
-      const product: Product = await this.productService.findOne({
-        id: p.product_id,
-      });
+      const o = new Order();
+      o.user_id = link.user.id;
+      o.ambassador_email = link.user.email;
+      o.first_name = body.first_name;
+      o.last_name = body.last_name;
+      o.email = body.email;
+      o.address = body.address;
+      o.country = body.country;
+      o.city = body.city;
+      o.zip = body.zip;
+      o.code = body.code;
 
-      const orderItem = new OrderItem();
-      orderItem.order = order;
-      orderItem.product_title = product.title;
-      orderItem.price = product.price;
-      orderItem.quantity = p.quantity;
-      orderItem.ambassador_revenue = 0.1 * product.price * p.quantity;
-      orderItem.admin_revenue = 0.9 * product.price * p.quantity;
+      const order = await queryRunner.manager.save(o);
 
-      await this.orderItemService.save(orderItem);
+      for (const p of body.products) {
+        const product: Product = await this.productService.findOne({
+          id: p.product_id,
+        });
+
+        const orderItem = new OrderItem();
+        orderItem.order = order;
+        orderItem.product_title = product.title;
+        orderItem.price = product.price;
+        orderItem.quantity = p.quantity;
+        orderItem.ambassador_revenue = 0.1 * product.price * p.quantity;
+        orderItem.admin_revenue = 0.9 * product.price * p.quantity;
+
+        await queryRunner.manager.save(orderItem);
+      }
+
+      await queryRunner.commitTransaction();
+
+      return order;
+    } catch (e) {
+      await queryRunner.rollbackTransaction();
+      throw new BadRequestException();
+    } finally {
+      await queryRunner.release();
     }
-
-    return order;
   }
 }
